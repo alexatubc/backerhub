@@ -1,11 +1,7 @@
 from dotenv import load_dotenv
 import os
-
-from pyasn1_modules.rfc5924 import id_kp
-
 import requests
 import sqlite3
-from dataclasses import dataclass, astuple
 import datetime
 from emoji import replace_emoji
 
@@ -19,6 +15,22 @@ SHEET_ID = '1Z8aANbxXbnUGoZPRvJfWL3gz6jrzPPrwVt3d0c1iJ_4'
 CURRENTDATETIME = datetime.datetime.now()
 
 GRIMMR3XX_TEMPLATE = ['era', 'name', 'notes', 'track length', 'file date', 'leak date', 'type', 'portion', 'quality', 'link(s)']
+
+COLUMN_KEYWORDS = {
+    'era' : ['era', 'year'],
+    'name' : ['name', 'title'],
+    'notes' : ['notes', 'note'],
+    'track length' : ['length', 'track length', 'duration'],
+    'record date' : ['file date', 'record date', 'recording date', 'recorded date', 'origin date'],
+    'leak date' : ['leak date', 'leaked date'],
+    'quality' : ['quality'],
+    'portion' : ['portion', 'available length', 'type'],
+    'links' : ['link', 'link(s)', 'download', 'downloads', 'source', 'source(s)', 'download/link(s)'],
+}
+
+MERGED_COL_KEYWORDS = {
+    'portion/quality' : ['what\'s available']
+}
 
 insertArtistQuery = '''
     INSERT INTO 
@@ -63,8 +75,8 @@ def main():
     cursor.execute('SELECT * FROM Artists')
     trackersheet = cursor.fetchall()
 
-    total = len(trackersheet)
-    num = 1
+    num_artists_total = len(trackersheet)
+    num_artists_accessed = 1
     for artist in trackersheet:
         sheet_id = artist[2]
         artist_sheet = call_sheet(sheet_id, 'unreleased')
@@ -93,8 +105,8 @@ def main():
                 connection.commit()
             except (IndexError, KeyError) as e:
                 print(f'{e}')
-        print(f'Accessed {artist[1]}\'s sheet. {num}/{total} sheets accessed.')
-        num += 1
+        print(f'Accessed {artist[1]}\'s sheet. {num_artists_accessed}/{num_artists_total} sheets accessed.')
+        num_artists_accessed += 1
 
 def call_sheet(sheet_id, keyword=''):
     url = f'https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}'
@@ -231,8 +243,21 @@ def get_link_tuple(row, track_id):
     link_tuple = (track_id, link, works)
     return link_tuple
 
-if __name__ == '__main__':
-    main()
+def make_col_map(header):
+    # this functions need to produce the indices for each row
+    # it doesn't need to populate everything i.e. the minimum needed is a name and a link
+    # this means it should likely work on some scoring system, and have an (adjustable?) threshold
+    # some columns may be merged (most probably quality and portion)
+    col_map = {}
+    for idx, col_name in enumerate(header):
+        # need a check for merged col keywords
+        for key, value in COLUMN_KEYWORDS.items():
+            if any(keyword in col_name.lower() for keyword in value):
+                col_map[key] = idx
+    return col_map
 
+if __name__ == '__main__':
+    ma = make_col_map(['Era', 'Name', 'Notes', 'Track Length', 'File / Recording Date', 'Leak Date', 'Portion', 'Quality', 'Download / Link(s)'])
+    print(ma)
 
 # test
