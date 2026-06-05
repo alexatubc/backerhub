@@ -20,16 +20,16 @@ COLUMN_KEYWORDS = {
     'era' : ['era', 'year'],
     'name' : ['name', 'title'],
     'notes' : ['notes', 'note'],
-    'track length' : ['length', 'track length', 'duration'],
+    'track length' : ['track', 'duration'],
     'record date' : ['file date', 'record date', 'recording date', 'recorded date', 'origin date'],
     'leak date' : ['leak date', 'leaked date'],
     'quality' : ['quality'],
-    'portion' : ['portion', 'available length', 'type'],
+    'portion' : ['portion', 'available', 'type'],
     'links' : ['link', 'link(s)', 'download', 'downloads', 'source', 'source(s)', 'download/link(s)'],
 }
 
 MERGED_COL_KEYWORDS = {
-    'portion/quality' : ['what\'s available']
+    'portion/quality' : ['what\'s available','what\'s new?']
 }
 
 insertArtistQuery = '''
@@ -89,15 +89,17 @@ def main():
         if not follows_tracker_template(header, GRIMMR3XX_TEMPLATE):
             print(f'{artist[1]}\'s sheet does not have a recognized template')
             pass
+        col_map = build_col_map(header)
+        print(col_map)
         for row in artist_sheet:
             try:
                 # doesn't scrape rows containing headers, footers, and era info pages
                 # TODO: doesn't pick up headers (e.g. 50 cent tracker)
                 if not is_song(row):
                     continue
-                track_tuple = get_track_tuple(artist, row)
+                track_tuple = get_track_tuple(artist, row, col_map)
                 cursor.execute(insertTrackQuery, track_tuple)
-                link_tuple = get_link_tuple(row, cursor.lastrowid)
+                link_tuple = get_link_tuple(row, cursor.lastrowid, col_map)
                 if not all(link_tuple):
                     connection.commit()
                     continue
@@ -190,7 +192,7 @@ def get_artist_tuple(row):
     sheet_id = find_sheet_id(get_cell(row, 0, 'hyperlink'))
     alternate = is_tracker_alternate(get_cell(row, 0))
     best_of = is_tracker_bestof(get_cell(row, 0))
-    credits = get_cell(row, 1)  # currently unused
+    credits = get_cell(row, 1)  # currently unreferenced
     up_to_date = get_cell(row, 2)
     working = get_cell(row, 3)
     last_synced = CURRENTDATETIME
@@ -220,44 +222,54 @@ def is_song(row):
     else:
         return True
 
-def get_track_tuple(artist, row):
+def get_track_tuple(artist, row, col_map):
     artist_id = artist[0]
-    era = get_cell(row, 0)
-    name = get_cell(row, 1)
-    notes = get_cell(row, 2)
-    track_length = get_cell(row, 3)
-    file_date = get_cell(row, 4)
-    leak_date = get_cell(row, 5)
-    portion = get_cell(row, 7)
-    quality = get_cell(row, 8)
+    era = get_cell(row, col_map['era'])
+    name = get_cell(row, col_map['name'])
+    notes = get_cell(row, col_map['notes'])
+    track_length = get_cell(row, col_map['track length'])
+    file_date = get_cell(row, col_map['record date'])
+    leak_date = get_cell(row, col_map['leak date'])
+    portion = get_cell(row, col_map['portion'])
+    quality = get_cell(row, col_map['quality'])
     last_synced = CURRENTDATETIME
 
     track_tuple = (artist_id, era, name, notes, quality, portion, track_length, file_date, leak_date, last_synced)
     return track_tuple
 
-def get_link_tuple(row, track_id):
+def get_link_tuple(row, track_id, col_map):
     track_id = track_id
-    link = get_cell(row, 9, 'hyperlink')
+    link = get_cell(row, col_map['links'], 'hyperlink')
     works = 'Yes' # needs to check through requests maybe? or if its pillows do an api req?
 
     link_tuple = (track_id, link, works)
     return link_tuple
 
-def make_col_map(header):
-    # this functions need to produce the indices for each row
-    # it doesn't need to populate everything i.e. the minimum needed is a name and a link
-    # this means it should likely work on some scoring system, and have an (adjustable?) threshold
-    # some columns may be merged (most probably quality and portion)
+def build_col_map(header):
     col_map = {}
-    for idx, col_name in enumerate(header):
-        # need a check for merged col keywords
+    for idx, col_value in enumerate(header):
+        # TODO: make this more readable
+        col_name = ' '.join(col_value.get('formattedValue','').replace('\n',' ').split())
+        # some trackers concetrate information into one column (see travis scott sheet, "What's New?")
+        # this loop will detect this
+        for key, value in MERGED_COL_KEYWORDS.items():
+            col_name_list = key.split('/')
+            # checking if column name in dictionary because the other way around would require accounting for
+            # all instances that exist (including symbols) which requires a bigger COLUMN_KEYWORDS dict
+            if any(keyword in col_name.lower() for keyword in value):
+                for col in col_name_list:
+                    col_map[col] = idx
         for key, value in COLUMN_KEYWORDS.items():
             if any(keyword in col_name.lower() for keyword in value):
                 col_map[key] = idx
+                break
+    for col in COLUMN_KEYWORDS.keys():
+        if col not in col_map.keys():
+            col_map[col] = None
+
     return col_map
 
 if __name__ == '__main__':
-    ma = make_col_map(['Era', 'Name', 'Notes', 'Track Length', 'File / Recording Date', 'Leak Date', 'Portion', 'Quality', 'Download / Link(s)'])
-    print(ma)
+    main()
 
 # test
