@@ -33,17 +33,17 @@ MERGED_COL_KEYWORDS = {
 }
 
 insertArtistQuery = '''
-    INSERT INTO 
+    INSERT OR IGNORE INTO 
     Artists (name, sheet_id, last_synced, up_to_date, working, alternate, best_of) 
     VALUES (?, ?, ?, ?, ?, ?, ?);
 '''
 insertTrackQuery = '''
-    INSERT INTO
+    INSERT OR IGNORE INTO
     Tracks (artist_id, era, name, notes, quality, portion, track_length, recording_date, leak_date, snapshot_date)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 '''
 insertLinkQuery = '''
-    INSERT INTO
+    INSERT OR IGNORE INTO
     Links (track_id, url, works)
     VALUES (?, ?, ?)
 ''' # could try to recogize what the link leads to (e.g. image-sharing, video-sharing, news, etc.)
@@ -78,17 +78,18 @@ def main():
     num_artists_total = len(trackersheet)
     num_artists_accessed = 1
     for artist in trackersheet:
+        artist_id = artist[0]
         sheet_id = artist[2]
         artist_sheet = call_sheet(sheet_id, 'unreleased')
         if not artist_sheet:
-            print(f'Couldn\'t access {artist[0]}\'s sheet')
+            # this currently can't account for not accessing due to network issues (not a dead sheet)
+            print(f'Couldn\'t access {artist[1]}\'s tracker.')
+            cursor.execute('UPDATE Artists SET working = ? WHERE id = ?', ('No', artist[0]))
+            connection.commit()
             continue
         # artist trackers are unstandardized, meaning its currently too hard to scrape all of them
         # this function will check if it follows the GrimmR3xx or Ye template, but can be expanded later
         header = artist_sheet[0].get('values', '')
-        if not follows_tracker_template(header, GRIMMR3XX_TEMPLATE):
-            print(f'{artist[1]}\'s sheet does not have a recognized template')
-            pass
         col_map = build_col_map(header)
         print(col_map)
         for row in artist_sheet:
@@ -99,7 +100,12 @@ def main():
                     continue
                 track_tuple = get_track_tuple(artist, row, col_map)
                 cursor.execute(insertTrackQuery, track_tuple)
-                link_tuple = get_link_tuple(row, cursor.lastrowid, col_map)
+                cursor.execute(
+                    'SELECT id FROM Tracks WHERE artist_id = ? AND name = ?',
+                    (artist_id, track_tuple[2])  # artist_id, name
+                )
+                track_id = cursor.fetchone()[0]
+                link_tuple = get_link_tuple(row, track_id, col_map)
                 if not all(link_tuple):
                     connection.commit()
                     continue
@@ -202,22 +208,15 @@ def get_artist_tuple(row):
     artist_tuple = (artist_name, sheet_id, last_synced, up_to_date, working, alternate, best_of)
     return artist_tuple
 
-def follows_tracker_template(header, keywords):
-    # TODO: fix
-    for idx, cell in enumerate(header):
-        if cell.get('formattedValue','').lower() != keywords[idx]:
-            return False
-    return True
-
-def is_song(row):
+def is_song(row, col_map):
     # TODO: compact/pythonicize
-    if get_cell(row, 0) == '':
+    if get_cell(row, col_map['era']) == '':
         return False
-    elif get_cell(row, 1) == '':
+    elif get_cell(row, col_map['name']) == '':
         return False
-    elif get_cell(row, 7) == '':
+    elif get_cell(row, col_map['quality']) == '':
         return False
-    elif get_cell(row, 8) == '':
+    elif get_cell(row, col_map['portion']) == '':
         return False
     else:
         return True
@@ -263,6 +262,7 @@ def build_col_map(header):
             if any(keyword in col_name.lower() for keyword in value):
                 col_map[key] = idx
                 break
+    # puts none if the column type wasnt detected. this is easier than dealing with the error at function get_cell
     for col in COLUMN_KEYWORDS.keys():
         if col not in col_map.keys():
             col_map[col] = None
