@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS Artists (
     id INTEGER PRIMARY KEY,
     name TEXT,
-    sheet_id TEXT,
+    sheet_id TEXT UNIQUE,
     last_synced TIMESTAMP,
     up_to_date BOOLEAN,
     working BOOLEAN,
@@ -21,13 +21,14 @@ CREATE TABLE IF NOT EXISTS Tracks (
     recording_date TIMESTAMP,
     leak_date TIMESTAMP,
     snapshot_date TIMESTAMP,
-    FOREIGN KEY (artist_id) REFERENCES Artists(id)
+    FOREIGN KEY (artist_id) REFERENCES Artists(id),
+    UNIQUE(artist_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS Links (
     id INTEGER PRIMARY KEY,
     track_id INTEGER,
-    url TEXT,
+    url TEXT UNIQUE,
     works BOOLEAN,
     FOREIGN KEY (track_id) REFERENCES Tracks(id)
 );
