@@ -18,6 +18,10 @@ MERGED_COL_KEYWORDS = {
     'portion/quality': ['what\'s available', 'what\'s new?']
 }
 
+HEADER_VALUES = set()
+for keywords in COLUMN_KEYWORDS.values():
+    HEADER_VALUES.update(keywords)
+
 insertArtistQuery = '''
     INSERT OR IGNORE INTO 
     Artists (name, sheet_id, last_synced, up_to_date, working, alternate, best_of) 
