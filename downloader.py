@@ -3,7 +3,7 @@ import pixeldrain_reloaded as pixeldrain
 import sqlite3
 from constants import *
 import requests
-from re import search
+import re
 from os.path import splitext
 from shutil import copyfileobj
 from os import makedirs
@@ -60,7 +60,7 @@ def download_file(link: str, parent_dir: str, file_hoster: str, cursor):
     result = cursor.fetchone()
     artist_name, era, track_name = result if result else ('unknown', 'unknown', 'unknown')
 
-    output_path = f'{parent_dir}/{artist_name}/{era}'
+    output_path = f'{parent_dir}/{sanitize_path(artist_name)}/{sanitize_path(era)}'
     makedirs(output_path, exist_ok=True)
 
     match file_hoster:
@@ -119,6 +119,10 @@ def download_krakenfiles(link: str, output_dir: str):
 def download_pixeldrain(link: str, output_dir: str):
     file_id = link.split('/')[-1]
     pixeldrain.Sync.download_file(file_id, output_dir) # can add custom filename
+
+
+def sanitize_path(s):
+    return re.sub(r'[<>:"/\\|?*]', '', s).strip()
 
 
 if __name__ == '__main__':
