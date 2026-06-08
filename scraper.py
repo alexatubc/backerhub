@@ -1,7 +1,9 @@
+from constants import *
+from emoji import replace_emoji
 import requests
 import sqlite3
-from emoji import replace_emoji
-from constants import *
+
+
 
 
 # sheet id retrieved from gui.py
@@ -45,11 +47,9 @@ def main():
             cursor.execute('UPDATE Artists SET working = ? WHERE id = ?', ('No', artist[0]))
             connection.commit()
             continue
-        # artist trackers are unstandardized, meaning its currently too hard to scrape all of them
-        # this function will check if it follows the GrimmR3xx or Ye template, but can be expanded later
+        # trackers are unstandardized, this builds a map for where each column is dynamically
         header = artist_sheet[0].get('values', '')
         col_map = build_col_map(header)
-        print(col_map)
         for row in artist_sheet:
             try:
                 # doesn't scrape rows containing headers, footers, and era info pages
@@ -98,9 +98,10 @@ def call_sheet(sheet_id: str, tab_keyword: str = '') -> list:
     try:
         response.raise_for_status()
         workbook = response.json().get('sheets', [])
-        worksheet = workbook[0]['data'][0].get('rowData', [])
+        worksheet = workbook[0]['data'][0].get('rowData', [])stuff
         return worksheet
-    # TODO: change to raise error
+    # TODO: change to raise errorstuff
+    # TODO: Describe specific error
     except IndexError as e:
         return []
     except requests.exceptions.HTTPError as e:
@@ -132,7 +133,7 @@ def get_cell(row, index: int, string_format: str='formattedValue', default: str=
 def sanitize_name(name: str) -> str:
     try:
         # unsure if name_no_tags is required, as it makes identifying artist sheets of the same artist hard in sqlite
-        name_no_tags = name.split('[')[0]
+        name_no_tags = name.split('[')[0] # this may be causing issues
         name_no_emoji = replace_emoji(name_no_tags, replace='').strip()
         return name_no_emoji
     except (AttributeError, IndexError):
@@ -178,17 +179,19 @@ def get_artist_tuple(row: list[str]) -> tuple:
 
 
 def is_song(row: list[str], col_map: dict) -> bool:
-    # TODO: compact/pythonicize
-    cell_is_empty = [
-        get_cell(row, col_map['era']) == '',
-        get_cell(row, col_map['name']) == '',
-        get_cell(row, col_map['quality']) == '',
-        get_cell(row, col_map['portion']) == '',
-    ]
-    if any(cell_is_empty):
+    name = get_cell(row, col_map['name']).lower()
+    era = get_cell(row, col_map['era']).lower()
+    quality = get_cell(row, col_map['quality']).lower()
+    portion = get_cell(row, col_map['portion']).lower()
+
+    if any(v in HEADER_VALUES for v in [name, era, quality, portion]):
         return False
-    else:
-        return True
+    if name and not quality and not portion:
+        return False
+    if not name:
+        return False
+
+    return True
 
 
 def get_track_tuple(artist: list[str], row: list[str], col_map: dict) -> tuple:
@@ -217,6 +220,7 @@ def get_link_tuple(row: list[str], track_id: str, col_map: dict) -> tuple:
 
 
 def build_col_map(header: list) -> dict:
+    # some headers are on line 2
     col_map = {}
     for idx, col_value in enumerate(header):
         # TODO: make this more readable
