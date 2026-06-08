@@ -1,83 +1,125 @@
-
-from asyncio import sleep
-from concurrent.futures import ThreadPoolExecutor
+from pykraken.kraken import Kraken
+import pixeldrain_reloaded as pixeldrain
+import sqlite3
+from constants import *
+import requests
 from re import search
-from requests import get
-from os import remove, makedirs
-from os.path import exists, join, isfile
-from shutil import copyfileobj, rmtree
+from os.path import splitext
+from shutil import copyfileobj
+from os import makedirs
 
-INPUT_FILE = "input.txt"
-OUTPUT_DIR = "output"
+"""
+Count of links used to host files in Trackerhub
+18594 pillows.su
+ 2758 pixeldrain.com
+ 2399 krakenfiles.com
+ 2316 pillowcase.su
+ 1878 imgur.gg
+  789 drive.google.com
+"""
 
-PAGE_URL = "https://pillowcase.su/f/"
-API_URL = "https://api.pillowcase.su/api/download/"
+# parent_dir comes from gui.py
+PARENT_DIR = 'example'
 
-FILE_NAME_REGEX = r'filename:"(.*?)",cover:'
+def main():
+    # temporary, list of links (maybe with associated names) should come from gui.py
+    connection = sqlite3.connect('TrackerHub.db', detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES)
+    cursor = connection.cursor()
+    cursor.execute('SELECT * FROM Links')
+    link_table = cursor.fetchall()
 
-THREAD_POOL_SIZE = 32
+    for row in link_table:
+        link = row[2]
+        try:
+            file_hoster = find_file_hoster(link)
+            download_file(link, PARENT_DIR, file_hoster, cursor)
+        except Exception as e:
+            print(f'Failed to download {link}: {e}')
 
-thread_pool = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
 
-def fetch_file_info(file_id):
-    print(f"Fetching file info for ID: {file_id}")
-    url = f"{PAGE_URL}{file_id}"
-    response = get(url)
-    if response.status_code == 200:
-        match = search(FILE_NAME_REGEX, response.text)
-        if match:
-            file_name = match.group(1)
-            return file_name
-        else:
-            raise Exception("Filename not found in the response")
+def find_file_hoster(link: str) -> str:
+    domain = link.split('//')[1].split('/')[0]
+    if 'pillow' in domain:
+        return 'pillowcase'
+    elif 'kraken' in domain:
+        return 'krakenfiles'
+    elif 'pixeldrain' in domain:
+        return 'pixeldrain'
     else:
-        raise Exception(f"Failed to fetch file info: {response.status_code}")
+        return 'unrecognized domain'
 
-def download_file(file_id, file_name):
-    print(f"Downloading: {file_name}")
-    url = f"{API_URL}{file_id}"
-    response = get(url, stream=True)
-    if response.status_code == 200:
-        with open(join(OUTPUT_DIR, file_name), "wb") as file:
-            copyfileobj(response.raw, file)
-        print(f"Downloaded: {file_name}")
+
+def download_file(link: str, parent_dir: str, file_hoster: str, cursor):
+    cursor.execute('''
+        SELECT Artists.name, Tracks.era, Tracks.name
+        FROM Links
+        JOIN Tracks ON Links.track_id = Tracks.id
+        JOIN Artists ON Tracks.artist_id = Artists.id
+        WHERE Links.url = ?
+    ''', (link,))
+    result = cursor.fetchone()
+    artist_name, era, track_name = result if result else ('unknown', 'unknown', 'unknown')
+
+    output_path = f'{parent_dir}/{artist_name}/{era}'
+    makedirs(output_path, exist_ok=True)
+
+    match file_hoster:
+        case 'pillowcase':
+            download_pillowcase(link, output_path)
+        case 'krakenfiles':
+            download_krakenfiles(link, output_path)
+        case 'pixeldrain':
+            download_pixeldrain(link, output_path)
+        case 'unrecognized domain':
+            print("Unrecognized domain, skipping...")
+
+
+def download_pillowcase(link: str, output_dir: str):
+    file_id = link.rstrip('/').split('/')[-1]
+    if 'pillows' in link:
+        domain = 'pillows'
+    elif 'pillowcase' in link:
+        domain = 'pillowcase'
     else:
-        if response.status_code == 408:
-            print(f"Request timed out downloading {file_name}. Retrying in 5 seconds...")
-            sleep(5)
-            download_file(file_id, file_name)
-        else:
-            print(f"Failed to download {file_name}: {response.status_code}")
-            raise Exception(f"Failed to download file: {response.status_code}")
+        print('Pillowcase: Unrecognized domain')
+        return ''
 
-# Prepare the output directory
-if exists(OUTPUT_DIR) and isfile(OUTPUT_DIR):
-    remove(OUTPUT_DIR)
-elif exists(OUTPUT_DIR):
-    rmtree(OUTPUT_DIR)
-makedirs(OUTPUT_DIR)
+    # get extension for file
+    r = requests.get(f'https://{domain}.su/f/{file_id}')
+    match = search(r'filename:"(.*?)"', r.text)
+    if not match:
+        file_name = None
+        for ext in COMMON_EXTS:
+            url = f'https://api.{domain}.su/api/download/{file_id}{ext}'
+            r = requests.head(url)  # HEAD request, no download
+            if r.status_code == 200:
+                file_name = f'unknown{ext}'
+                break
+        if not file_name:
+            raise Exception(f'Pillowcase: Could not determine filename for {file_id}')
+    else:
+        file_name = match.group(1)
 
-# Read the input file and extract links
-links = []
-with open(INPUT_FILE, "r") as file:
-    for line in file.readlines():
-        line = line.strip()
-        if "pillows.su" in line:
-            file_id = line.split("/")[-1]
-            links.append(file_id)
-        else:
-            print(f"Invalid link: {line.strip()}")
+    # download
+    ext = splitext(file_name)[1]
+    download_url = f'https://api.{domain}.su/api/download/{file_id}{ext}'
+    r = requests.get(download_url, stream=True)
+    r.raise_for_status()
+    with open(f'{output_dir}/{file_name}', 'wb') as f:
+        copyfileobj(r.raw, f)
+    print(f'Downloaded: {file_name}')
+    return file_name
 
-# Process the links in parallel
-def process_link(link):
-    try:
-        file_name = fetch_file_info(link)
-        download_file(link, file_name)
-    except Exception as e:
-        print(f"Error processing {link}: {e}")
 
-for link in links:
-    try:
-        thread_pool.submit(process_link, link)
-    except Exception as e:
-        print(f"Error processing {link}: {e}")
+def download_krakenfiles(link: str, output_dir: str):
+    k = Kraken()
+    k.download_file(link, output_dir)
+
+
+def download_pixeldrain(link: str, output_dir: str):
+    file_id = link.split('/')[-1]
+    pixeldrain.Sync.download_file(file_id, output_dir) # can add custom filename
+
+
+if __name__ == '__main__':
+    main()
