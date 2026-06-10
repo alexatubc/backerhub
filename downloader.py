@@ -1,3 +1,22 @@
+# pykraken uses the `cgi` module which was removed in Python 3.13.
+# This shim patches it before pykraken is imported.
+import sys
+if sys.version_info >= (3, 13):
+    import types
+    from email.message import Message as _Message
+
+    class _CGIShim:
+        @staticmethod
+        def parse_header(value):
+            msg = _Message()
+            msg['content-disposition'] = value
+            params = dict(msg.get_params() or [])
+            key = next(iter(params), '')
+            del params[key]
+            return key, params
+
+    sys.modules['cgi'] = _CGIShim()
+
 from pykraken.kraken import Kraken
 import pixeldrain_reloaded as pixeldrain
 import sqlite3
@@ -86,7 +105,7 @@ def download_pillowcase(link: str, output_dir: str):
 
     # get extension for file
     r = requests.get(f'https://{domain}.su/f/{file_id}')
-    match = search(r'filename:"(.*?)"', r.text)
+    match = re.search(r'filename:"(.*?)"', r.text)
     if not match:
         file_name = None
         for ext in COMMON_EXTS:
